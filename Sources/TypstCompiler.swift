@@ -12,6 +12,7 @@ class TypstCompiler: ObservableObject {
     @Published var compilationStatus: String = "Ready"
     @Published var isCompiling: Bool = false
     @Published var errors: [TypstError] = []
+    @Published var projectRoot: URL?
     
     // Check if typst makes sense or we need full path
     private func resolveTypstPath() -> String? {
@@ -92,7 +93,15 @@ class TypstCompiler: ObservableObject {
         
         let process = Process()
         process.executableURL = URL(fileURLWithPath: typstPath)
-        process.arguments = ["watch", sourceURL.path, outputURL.path]
+        
+        var arguments = ["watch"]
+        if let root = projectRoot {
+            arguments.append("--root")
+            arguments.append(root.path)
+            process.currentDirectoryURL = root
+        }
+        arguments.append(contentsOf: [sourceURL.path, outputURL.path])
+        process.arguments = arguments
         
         let pipe = Pipe()
         process.standardError = pipe // typst often logs to stderr or stdout, check both? usually stderr for logs
