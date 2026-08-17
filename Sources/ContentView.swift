@@ -303,6 +303,9 @@ Rectangle().fill(Color.gray.opacity(0.3)).frame(width: 1, height: 16)
         .onChange(of: selectedFile) { newValue in
             loadFile(url: newValue)
         }
+        .onChange(of: fileSystem.currentFolder) { newFolder in
+            compiler.projectRoot = newFolder
+        }
         .onReceive(NotificationCenter.default.publisher(for: .insertSnippet)) { notification in
             if let snippetKey = notification.object as? String {
                 switch snippetKey {
