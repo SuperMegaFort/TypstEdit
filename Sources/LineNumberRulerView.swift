@@ -1,154 +1,135 @@
 import AppKit
 
-class LineNumberRulerView: NSRulerView {
-    
-    // We can inject errors here to show markers
-    var errors: [Int] = [] {
-        didSet {
-            self.needsDisplay = true
-        }
-    }
-    
-    var font: NSFont {
-        return NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium)
-    }
-    
-    var textColor: NSColor {
-        return NSColor.gray // Visible gray color
-    }
-    
-    var backgroundColor: NSColor {
-        // More opaque to make ruler visible
-        return NSColor(white: 0.0, alpha: 0.4)
-    }
-    
+/// The ruler shares the editor's clip view. It has no document or independent scroll offset.
+final class LineNumberRulerView: NSRulerView {
+    var errors: Set<Int> = [] { didSet { needsDisplay = true } }
+    var gitChanges = GitLineMarkers() { didSet { needsDisplay = true } }
+    var onGitClick: ((Int, NSRect) -> Void)?
+    private var gitHitRegions: [(line: Int, rect: NSRect)] = []
+    private(set) var lineStarts = [0]
+    private let font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .regular)
+
+    override var isFlipped: Bool { true }
     override init(scrollView: NSScrollView?, orientation: NSRulerView.Orientation) {
         super.init(scrollView: scrollView, orientation: orientation)
-        self.ruleThickness = 40
+        ruleThickness = 48
     }
-    
-    required init(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
+    required init(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func updateLineStarts(_ text: String) {
+        let string = text as NSString
+        lineStarts = [0]
+        var offset = 0
+        while offset < string.length {
+            let end = NSMaxRange(string.lineRange(for: NSRange(location: offset, length: 0)))
+            guard end > offset else { break }
+            if end < string.length || (end == string.length && [10, 13].contains(string.character(at: end - 1))) {
+                lineStarts.append(end)
+            }
+            offset = end
+        }
+        refreshThickness()
     }
-    
+
+    /// editedRange is in the new text; the old range ends at newEnd - changeInLength.
+    /// Rescan neighboring logical lines, including both sides of a possible CRLF join.
+    func applyEdit(in text: NSString, editedRange: NSRange, changeInLength delta: Int) {
+        let oldEnd = NSMaxRange(editedRange) - delta
+        func upperBound(_ offset: Int) -> Int {
+            var low = 0, high = lineStarts.count
+            while low < high {
+                let middle = (low + high) / 2
+                if lineStarts[middle] <= offset { low = middle + 1 } else { high = middle }
+            }
+            return low
+        }
+        let first = max(0, upperBound(editedRange.location) - 2)
+        let last = min(lineStarts.count, upperBound(oldEnd) + 1)
+        let limit = last < lineStarts.count ? lineStarts[last] + delta : text.length
+        var replacement = [lineStarts[first]]
+        var offset = replacement[0]
+        while offset < limit {
+            let end = NSMaxRange(text.lineRange(for: NSRange(location: offset, length: 0)))
+            guard end > offset else { break }
+            if end < limit || (last == lineStarts.count && end == text.length && [10, 13].contains(text.character(at: end - 1))) {
+                replacement.append(end)
+            }
+            offset = end
+        }
+        // Shift the cached suffix without bridging/scanning all the source characters.
+        if last < lineStarts.count {
+            for index in last..<lineStarts.count { lineStarts[index] += delta }
+        }
+        lineStarts.replaceSubrange(first..<last, with: replacement)
+        refreshThickness()
+    }
+
+    private func refreshThickness() {
+        let thickness = max(48, CGFloat(String(lineStarts.count).count) * 8 + 20)
+        if ruleThickness != thickness { ruleThickness = thickness }
+        needsDisplay = true
+    }
+
+    override func scrollWheel(with event: NSEvent) { scrollView?.scrollWheel(with: event) }
+
+    override func mouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        if let hit = gitHitRegions.first(where: { $0.rect.insetBy(dx: -3, dy: -3).contains(point) }),
+           gitChanges[hit.line] != nil {
+            onGitClick?(hit.line, hit.rect)
+        } else { super.mouseDown(with: event) }
+    }
+
     override func drawHashMarksAndLabels(in rect: NSRect) {
-        guard let textView = self.clientView as? NSTextView,
-              let layoutManager = textView.layoutManager,
-              let textContainer = textView.textContainer
-        else {
-            return
+        gitHitRegions.removeAll(keepingCapacity: true)
+        guard let view = clientView as? NSTextView, let layout = view.layoutManager,
+              let container = view.textContainer else { return }
+        NSGraphicsContext.saveGraphicsState()
+        NSBezierPath(rect: bounds).addClip()
+        defer { NSGraphicsContext.restoreGraphicsState() }
+        NSColor(white: 0, alpha: 0.15).setFill()
+        bounds.fill()
+        let visible = view.visibleRect.offsetBy(dx: -view.textContainerOrigin.x, dy: -view.textContainerOrigin.y)
+        let glyphs = layout.glyphRange(forBoundingRect: visible, in: container)
+        let characters = layout.characterRange(forGlyphRange: glyphs, actualGlyphRange: nil)
+        // Binary search cached UTF-16 line offsets; only lay out visible logical lines.
+        var low = 0
+        var high = lineStarts.count
+        while low < high {
+            let middle = (low + high) / 2
+            if lineStarts[middle] < characters.location { low = middle + 1 } else { high = middle }
         }
-        
-        // Define toolbar height (must match textContainerInset in EditorView)
-        let toolbarHeight: CGFloat = 58
-        
-        // Only draw below the toolbar area
-        let drawingRect = NSRect(
-            x: rect.minX,
-            y: max(rect.minY, toolbarHeight),
-            width: rect.width,
-            height: max(0, rect.maxY - toolbarHeight)
-        )
-        
-        // Background
-        backgroundColor.setFill()
-        drawingRect.fill()
-        
-        // Draw Border (only below toolbar)
-        NSColor.separatorColor.setStroke()
-        let borderPath = NSBezierPath()
-        borderPath.move(to: NSPoint(x: ruleThickness, y: drawingRect.minY))
-        borderPath.line(to: NSPoint(x: ruleThickness, y: drawingRect.maxY))
-        borderPath.lineWidth = 1
-        borderPath.stroke()
-        
-        // Get container origin offset (handles padding/inset)
-        let containerOrigin = textView.textContainerOrigin
-        
-        // Convert visible rect to container coords
-        let visibleRect = textView.visibleRect
-        // We calculate the range of glyphs that are actually visible
-        // We can just ask for the whole range in the rect, shifting by origin
-        let visibleRectInContainer = visibleRect.offsetBy(dx: -containerOrigin.x, dy: -containerOrigin.y)
-        
-        let visibleGlyphRange = layoutManager.glyphRange(forBoundingRect: visibleRectInContainer, in: textContainer)
-        
-        // Start counting lines from beginning to finding correct number for first visible line
-        // (Optimization: In a real large app, you'd want something smarter than O(N) from start)
-        var lineNumber = 1
-        let fullString = textView.string as NSString
-        if visibleGlyphRange.location > 0 {
-            let substring = fullString.substring(to: visibleGlyphRange.location)
-            lineNumber += substring.filter { $0 == "\n" }.count
-            // If the last character before visible range is NOT a newline, we are in the middle of a line, 
-            // so the current line number is correct for this fragment.
-            // If it IS a newline, we are starting a new line, so increment.
-            // Actually, if substring ends in \n, the NEXT char is on next line.
-            // So count of \n gives us how many lines *completed*. 
-            // Current line index is count + 1. So `lineNumber` is correct.
-        }
-        
-        // Iterate visible glyphs
-        var glyphIndex = visibleGlyphRange.location
-        while glyphIndex < NSMaxRange(visibleGlyphRange) {
-            var lineRange = NSRange()
-            layoutManager.lineFragmentRect(forGlyphAt: glyphIndex, effectiveRange: &lineRange)
-            
-            // Calculate Y position in View Coordinates
-            let lineRect = layoutManager.lineFragmentRect(forGlyphAt: glyphIndex, effectiveRange: nil)
-            let yInView = lineRect.origin.y + containerOrigin.y
-            let yPos = self.convert(NSPoint(x: 0, y: yInView), from: textView).y
-            
-            // Check if this fragment starts a new line
-            var isNewLine = true
-            if glyphIndex > 0 {
-                let charRange = layoutManager.characterRange(forGlyphRange: NSRange(location: glyphIndex - 1, length: 1), actualGlyphRange: nil)
-                if charRange.location < fullString.length {
-                    let prevChar = fullString.substring(with: charRange)
-                    isNewLine = (prevChar == "\n")
-                }
+        var index = max(0, low - 1)
+        while index < lineStarts.count {
+            let start = lineStarts[index]
+            if start > NSMaxRange(characters) { break }
+            let fragment: NSRect
+            if start < (view.string as NSString).length {
+                let glyph = layout.glyphIndexForCharacter(at: start)
+                fragment = layout.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
+            } else {
+                fragment = layout.extraLineFragmentRect
             }
-            
-            // Draw
-            if isNewLine {
-                let label = "\(lineNumber)" as NSString
-                
-                // Active Line Highlight could be added here
-                
-                let size = label.size(withAttributes: [.font: font])
-                
-                // Draw Line Number
-                let xPos = ruleThickness - size.width - 8
-                // Center vertically relative to line height
-                let centeredY = yPos + (lineRect.height - size.height) / 2
-                
-                let numberRect = NSRect(x: xPos, y: centeredY, width: size.width, height: size.height)
-                
-                label.draw(in: numberRect, withAttributes: [
-                    .font: font,
-                    .foregroundColor: NSColor.gray // Better contrast
-                ])
-                
-                // Draw Error if needed
-                if errors.contains(lineNumber) {
-                    let errorRect = NSRect(x: 4, y: centeredY + 3, width: 6, height: 6)
-                    NSColor.systemRed.setFill()
-                    let path = NSBezierPath(ovalIn: errorRect)
-                    path.fill()
-                }
+            let origin = convert(NSPoint(x: 0, y: fragment.minY + view.textContainerOrigin.y), from: view)
+            let label = String(index + 1) as NSString
+            let size = label.size(withAttributes: [.font: font])
+            let y = origin.y + max(0, (fragment.height - size.height) / 2)
+            if let change = gitChanges[index + 1] {
+                let color: NSColor = change == .added ? .systemGreen : change == .deleted ? .systemRed : .systemBlue
+                color.setFill()
+                let marker = change == .deleted
+                    ? NSRect(x: 13, y: origin.y - 2, width: 8, height: 3)
+                    : NSRect(x: 15, y: origin.y, width: 3, height: max(3, fragment.height))
+                NSBezierPath(rect: marker).fill()
+                gitHitRegions.append((index + 1, marker))
             }
-            
-            // Advance
-            glyphIndex = NSMaxRange(lineRange)
-            
-            // Check if we need to increment line number for next loop
-            let charRange = layoutManager.characterRange(forGlyphRange: lineRange, actualGlyphRange: nil)
-            if charRange.location + charRange.length <= fullString.length {
-               let fragmentString = fullString.substring(with: charRange)
-               if fragmentString.last == "\n" {
-                   lineNumber += 1
-               }
+            if errors.contains(index + 1) {
+                NSColor.systemRed.setFill()
+                NSBezierPath(ovalIn: NSRect(x: 4, y: y + 4, width: 6, height: 6)).fill()
             }
+            label.draw(at: NSPoint(x: ruleThickness - size.width - 8, y: y),
+                       withAttributes: [.font: font, .foregroundColor: NSColor.secondaryLabelColor])
+            index += 1
         }
     }
 }

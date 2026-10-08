@@ -1,38 +1,42 @@
 #!/bin/bash
-set -e
+set -euo pipefail
+cd "$(dirname "$0")"
 
 APP_NAME="TypstEdit"
-BUILD_DIR=".build/debug"
-EXECUTABLE="$BUILD_DIR/$APP_NAME"
-APP_BUNDLE="$APP_NAME.app"
-
-echo "Building..."
-swift build
-
-echo "Creating App Bundle..."
-rm -rf "$APP_BUNDLE"
-mkdir -p "$APP_BUNDLE/Contents/MacOS"
-mkdir -p "$APP_BUNDLE/Contents/Resources"
-
-cp "$EXECUTABLE" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
-
-# Copy Typst executable into the bundle
-echo "Bundling Typst executable..."
-mkdir -p "$APP_BUNDLE/Contents/Resources/bin"
-if [ -f "typst-aarch64-apple-darwin/typst" ]; then
-    cp "typst-aarch64-apple-darwin/typst" "$APP_BUNDLE/Contents/Resources/bin/typst"
-    chmod +x "$APP_BUNDLE/Contents/Resources/bin/typst"
-    echo "✓ Typst executable bundled"
+APP_DESTINATION="${APP_OUTPUT:-.build/TypstEdit.app}"
+APP_ARCH="${APP_ARCH:-$(uname -m)}"
+if [ -n "${BUNDLE_EXECUTABLE:-}" ]; then
+    EXECUTABLE="$BUNDLE_EXECUTABLE"
 else
-    echo "⚠️  Warning: Typst executable not found. App will require system Typst installation."
+    echo "Building optimized $APP_ARCH application..."
+    swift build -c release --arch "$APP_ARCH" "$@"
+    BUILD_DIR="$(swift build -c release --arch "$APP_ARCH" --show-bin-path "$@")"
+    EXECUTABLE="$BUILD_DIR/$APP_NAME"
 fi
-
+case "$APP_ARCH" in
+    arm64) TYPST_BINARY="typst-aarch64-apple-darwin/typst" ;;
+    x86_64) TYPST_BINARY="typst-x86_64-apple-darwin/typst" ;;
+    universal) TYPST_BINARY="typst-universal" ;;
+    *) echo "Unsupported architecture: $APP_ARCH" >&2; exit 1 ;;
+esac
+# Validate inputs before replacing a prior generated bundle.
+test -x "$EXECUTABLE"
+test -x "$TYPST_BINARY"
+# Build/sign outside Finder-managed or iCloud folders, which may reattach metadata
+# between xattr cleanup and codesign. Publish only the completed bundle.
+BUNDLE_STAGE="$(mktemp -d "${TMPDIR:-/tmp}/typstedit-bundle.XXXXXX")"
+trap 'rm -rf "$BUNDLE_STAGE"' EXIT
+APP_BUNDLE="$BUNDLE_STAGE/$APP_NAME.app"
+mkdir -p "$APP_BUNDLE/Contents/MacOS" "$APP_BUNDLE/Contents/Resources/bin"
+cp -X "$EXECUTABLE" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
+cp -X "$TYPST_BINARY" "$APP_BUNDLE/Contents/Resources/bin/typst"
+chmod +x "$APP_BUNDLE/Contents/Resources/bin/typst"
 
 # Icon Handling
 # Priority: Use existing AppIcon.icns if available, otherwise generate from icon.png
 if [ -f "AppIcon.icns" ]; then
     echo "Using custom AppIcon.icns..."
-    cp "AppIcon.icns" "$APP_BUNDLE/Contents/Resources/AppIcon.icns"
+    cp -X "AppIcon.icns" "$APP_BUNDLE/Contents/Resources/AppIcon.icns"
 elif [ -f "icon.png" ]; then
     echo "Generating App Icon from icon.png..."
     ICONSET="AppIcon.iconset"
@@ -67,7 +71,7 @@ cat > "$APP_BUNDLE/Contents/Info.plist" <<EOF
     <key>CFBundleExecutable</key>
     <string>$APP_NAME</string>
     <key>CFBundleIdentifier</key>
-    <string>com.example.$APP_NAME</string>
+    <string>com.supermegafort.$APP_NAME</string>
     <key>CFBundleName</key>
     <string>$APP_NAME</string>
     <key>CFBundleIconFile</key>
@@ -75,16 +79,27 @@ cat > "$APP_BUNDLE/Contents/Info.plist" <<EOF
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0</string>
+    <string>1.2.0</string>
     <key>CFBundleVersion</key>
     <string>1</string>
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
+    <key>CFBundleDocumentTypes</key>
+    <array><dict>
+        <key>CFBundleTypeName</key><string>Typst document</string>
+        <key>CFBundleTypeExtensions</key><array><string>typ</string></array>
+        <key>CFBundleTypeRole</key><string>Editor</string>
+    </dict></array>
     <key>NSHighResolutionCapable</key>
     <true/>
 </dict>
 </plist>
 EOF
 
-echo "Done! App is located at $APP_BUNDLE"
-
+# Finder metadata and resource forks are not signable bundle resources.
+xattr -dr com.apple.FinderInfo "$APP_BUNDLE" 2>/dev/null || true
+xattr -dr com.apple.ResourceFork "$APP_BUNDLE" 2>/dev/null || true
+codesign --force --deep --sign - "$APP_BUNDLE"
+mkdir -p "$(dirname "$APP_DESTINATION")"
+ditto --norsrc "$APP_BUNDLE" "$APP_DESTINATION"
+echo "Done! App is located at $APP_DESTINATION"

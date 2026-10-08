@@ -1,252 +1,55 @@
 import SwiftUI
 
-struct AppMenuCommands: Commands {
-    @ObservedObject var themeManager: ThemeManager
-    @Binding var selectedFile: URL?
-    
-    var body: some Commands {
-        // MARK: - File Menu
-        CommandGroup(replacing: .newItem) {
-            Button("New File") {
-                // TODO: Implement new file
-            }
-            .keyboardShortcut("n", modifiers: [.command, .shift])
-            
-            Button("Upload File...") {
-                // TODO: Implement file picker  
-            }
-            .keyboardShortcut("o", modifiers: .command)
-            
-            Divider()
-            
-            Button("Rename File") {
-                // TODO: Implement rename
-            }
-            // F2 shortcut not supported in SwiftUI Commands
-            
-            Button("Package Project") {
-                // TODO: Implement (PRO feature)
-            }
-            .disabled(true) // PRO feature placeholder
-            
-            Divider()
-            
-            Button("Quick Export PDF") {
-                // TODO: Implement quick export
-            }
-            .keyboardShortcut("s", modifiers:[.command, .shift])
-            
-            Menu("Export As") {
-                Button("PDF") {
-                    // TODO
-                }
-                Button("PNG") {
-                    // TODO
-                }
-                Button("SVG") {
-                    // TODO
-                }
-            }
-            
-            Divider()
-            
-            Button("Backup Project") {
-                // TODO: Implement backup
-            }
-        }
-        
-        // MARK: - Edit Menu
-        CommandGroup(replacing: .textEditing) {
-            Button("Undo") {
-                if let undoManager = NSApp.keyWindow?.firstResponder?.undoManager {
-                    undoManager.undo()
-                }
-            }
-            .keyboardShortcut("z", modifiers: .command)
-            
-            Button("Redo") {
-                if let undoManager = NSApp.keyWindow?.firstResponder?.undoManager {
-                    undoManager.redo()
-                }
-            }
-            .keyboardShortcut("z", modifiers: [.command, .shift])
-            
-            Divider()
-            
-            Button("Search and Replace") {
-                // TODO: Implement search/replace
-            }
-            .keyboardShortcut("f", modifiers: .command)
-            
-            Button("Go to Line") {
-                // TODO: Implement go to line
-            }
-            .keyboardShortcut("g", modifiers: .command)
-            
-            Divider()
-            
-            Button("Select All") {
-                NSApp.sendAction(#selector(NSText.selectAll(_:)), to: nil, from: nil)
-            }
-            .keyboardShortcut("a", modifiers: .command)
-            
-            Divider()
-            
-            Button("Toggle Line Comment") {
-                // TODO: Implement
-            }
-            .keyboardShortcut("/", modifiers: .command)
-            
-            Button("Toggle Block Comment") {
-                // TODO: Implement
-            }
-            .keyboardShortcut("/", modifiers: [.command, .option])
-            
-            Divider()
-            
-            Button("Add Suggestion/Comment") {
-                // TODO: PRO feature
-            }
-            .disabled(true)
-        }
-        
-        // MARK: - Insert Menu
-        CommandMenu("Insert") {
-            Button("Table") {
-                NotificationCenter.default.post(name: .insertSnippet, object: "table")
-            }
-            .keyboardShortcut("t", modifiers: [.command, .control])
-            
-            Button("Image") {
-                NotificationCenter.default.post(name: .insertSnippet, object: "image")
-            }
-            .keyboardShortcut("i", modifiers: [.command, .control])
-            
-            Button("Chart") {
-                NotificationCenter.default.post(name: .insertSnippet, object: "chart")
-            }
-            .keyboardShortcut("c", modifiers: [.command, .control])
-        }
-        
-        
-        // MARK: - View Menu
-        CommandMenu("View") {
-            Button("File Panel") {
-                // TODO: Toggle sidebar
-            }
-            
-            Button("Search Panel") {
-                // TODO: Show search panel
-            }
-            
-            Button("Outline Panel") {
-                // TODO: Show outline
-            }
-            
-            Button("Improve Panel") {
-                // TODO: Show improve panel
-            }
-            .keyboardShortcut("3", modifiers: [.command, .option])
-            
-            Button("Settings Panel") {
-                // TODO: Show settings
-            }
-            
-            Divider()
-            
-            Toggle("Show Collaborator Cursors", isOn: .constant(false))
-                .disabled(true) // PRO feature
-            
-            Toggle("Show Toolbar", isOn: .constant(true))
-            
-            Toggle("Scroll on Type", isOn: .constant(true))
-            
-            Toggle("Wrap Lines", isOn: .constant(false))
-            
-            Divider()
-            
-            Button("Split Views Vertically") {
-                // TODO
-            }
-            
-            Button("Split Views Horizontally") {
-                // TODO
-            }
-            
-            Divider()
-            
-            Menu("Cursor Size") {
-                Button("Small") { }
-                Button("Medium") { }
-                Button("Large") { }
-            }
-            
-            Divider()
-            
-            Button("Only Show Editor") {
-                // TODO
-            }
-            
-            Button("Only Show Preview") {
-                // TODO
-            }
-            
-            Toggle("Show Both Panels", isOn: .constant(true))
-            
-            Button("Show Preview in Popup") {
-                // TODO
-            }
-            
-            Divider()
-            
-            Menu("Simulate Color Blindness") {
-                Button("None") { }
-                Button("Protanopia") { }
-                Button("Deuteranopia") { }
-                Button("Tritanopia") { }
-            }
-            
-            Divider()
-            
-            Button("Present") {
-                // TODO: PRO
-            }
-            .disabled(true)
-            
-            Button("Speaker Mode") {
-                // TODO: PRO
-            }
-            .disabled(true)
-            
-            Divider()
-            
-            Button("Zoom In") {
-                // TODO
-            }
-            .keyboardShortcut("+", modifiers: .command)
-            
-            Button("Zoom Out") {
-                // TODO
-            }
-            .keyboardShortcut("-", modifiers: .command)
-            
-            Button("Fit to Width") {
-                // TODO
-            }
-            
-            Button("Fit to Height") {
-                // TODO
-            }
-            
-            Button("Fit to Page") {
-                // TODO
-            }
-        }
+struct DocumentActions {
+    let open: () -> Void
+    let save: () -> Void
+    let export: () -> Void
+    let refresh: () -> Void
+    let insert: (String) -> Void
+    let complete: () -> Void
+    let format: () -> Void
+    let hasDocument: Bool
+}
+struct DocumentActionsKey: FocusedValueKey { typealias Value = DocumentActions }
+extension FocusedValues {
+    var documentActions: DocumentActions? {
+        get { self[DocumentActionsKey.self] }
+        set { self[DocumentActionsKey.self] = newValue }
     }
 }
 
-// MARK: - Notification Names
-extension Notification.Name {
-    static let insertSnippet = Notification.Name("insertSnippet")
+struct AppMenuCommands: Commands {
+    @FocusedValue(\.documentActions) private var actions
+    var body: some Commands {
+        CommandGroup(replacing: .newItem) {
+            Button(L10n.text("Open Typst File…", "打开 Typst 文件…")) { actions?.open() }
+                .keyboardShortcut("o", modifiers: .command)
+        }
+        CommandGroup(replacing: .saveItem) {
+            Button(L10n.text("Save", "保存")) { actions?.save() }
+                .keyboardShortcut("s", modifiers: .command)
+                .disabled(actions?.hasDocument != true)
+            Button(L10n.text("Export PDF…", "导出 PDF…")) { actions?.export() }
+                .keyboardShortcut("e", modifiers: [.command, .shift])
+                .disabled(actions?.hasDocument != true)
+        }
+        CommandGroup(after: .textEditing) {
+            Button(L10n.text("Complete Typst", "Typst 自动补全")) { actions?.complete() }
+                .keyboardShortcut(.escape, modifiers: .option).disabled(actions?.hasDocument != true)
+            Button(L10n.text("Format Document", "格式化文档")) { actions?.format() }
+                .keyboardShortcut("f", modifiers: [.option, .shift]).disabled(actions?.hasDocument != true)
+        }
+        CommandMenu(L10n.text("Preview", "预览")) {
+            Button(L10n.text("Refresh Preview", "刷新预览")) { actions?.refresh() }
+                .keyboardShortcut("r", modifiers: [.command, .shift])
+                .disabled(actions?.hasDocument != true)
+        }
+        CommandMenu(L10n.text("Insert", "插入")) {
+            Button(L10n.text("Table", "表格")) { actions?.insert("table") }
+            Button(L10n.text("Image", "图片")) { actions?.insert("image") }
+            Button(L10n.text("Chart", "图表")) { actions?.insert("chart") }
+            Button(L10n.text("Timeline", "时间线")) { actions?.insert("timeline") }
+        }
+    }
 }
 

@@ -20,11 +20,11 @@ struct WelcomeView: View {
                     .foregroundColor(.white.opacity(0.8))
                     .shadow(radius: 10)
                 
-                Text("Welcome to TypstEdit")
+                Text(L10n.text("Welcome to TypstEdit", "欢迎使用 TypstEdit"))
                     .font(.system(size: 32, weight: .bold))
                     .foregroundColor(themeManager.textColor)
                 
-                Text("Create beautiful documents with the power of Typst.")
+                Text(L10n.text("Create beautiful documents with the power of Typst.", "使用 Typst 创作精美文档。"))
                     .font(.body)
                     .foregroundColor(themeManager.textColor.opacity(0.7))
                     .multilineTextAlignment(.center)
@@ -37,7 +37,7 @@ struct WelcomeView: View {
                                 .font(.system(size: 24))
                                 .padding(.bottom, 5)
                                 .foregroundColor(.blue)
-                            Text("New Project")
+                            Text(L10n.text("New Project", "新建项目"))
                                 .font(.headline)
                                 .foregroundColor(themeManager.textColor)
                         }
@@ -57,7 +57,7 @@ struct WelcomeView: View {
                                 .font(.system(size: 24))
                                 .padding(.bottom, 5)
                                 .foregroundColor(.blue)
-                            Text("Open Project")
+                            Text(L10n.text("Open Project", "打开项目"))
                                 .font(.headline)
                                 .foregroundColor(themeManager.textColor)
                         }
@@ -73,7 +73,7 @@ struct WelcomeView: View {
                 }
                 .padding(.top, 20)
                 
-                Button("Open Finder") {
+                Button(L10n.text("Open Finder", "打开访达")) {
                     NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: model.currentFolder?.path ?? FileManager.default.homeDirectoryForCurrentUser.path)
                 }
                 .buttonStyle(.link)
@@ -87,7 +87,7 @@ struct WelcomeView: View {
             
             // Right Panel: Recent Files
             VStack(alignment: .leading, spacing: 0) {
-                Text("Recent Files")
+                Text(L10n.text("Recent Files", "最近文件"))
                     .font(.headline)
                     .foregroundColor(themeManager.textColor)
                     .padding()

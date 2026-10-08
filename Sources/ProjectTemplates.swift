@@ -11,8 +11,26 @@ struct ProjectTemplate: Identifiable, Hashable {
 class ProjectTemplates {
     static let all: [ProjectTemplate] = [
         ProjectTemplate(
-            name: "Empty Project",
-            description: "A blank canvas for your document.",
+            name: L10n.text("Chinese / English", "中英文文档"),
+            description: L10n.text("Chinese fonts and bilingual text.", "中文字体与中英混排示例。"),
+            icon: "character.book.closed",
+            content: """
+            #set page(paper: "a4", margin: 2cm)
+            #set text(font: ("New Computer Modern", "PingFang SC"), lang: "zh", size: 11pt)
+            #set par(justify: true)
+
+            = 中英文文档 / Bilingual Document
+
+            中文输入与 English 可以混排。数学公式：$ E = m c^2 $。
+
+            == 开始写作 / Getting started
+
+            在此输入正文。Write your text here.
+            """
+        ),
+        ProjectTemplate(
+            name: L10n.text("Empty Project", "空白项目"),
+            description: L10n.text("A blank canvas for your document.", "从空白文档开始。"),
             icon: "doc.text",
             content: """
             #set page(width: auto, height: auto, margin: 1cm)
@@ -23,8 +41,8 @@ class ProjectTemplates {
             """
         ),
         ProjectTemplate(
-            name: "Article",
-            description: "A standard article format with title and sections.",
+            name: L10n.text("Article", "文章"),
+            description: L10n.text("A standard article format with title and sections.", "包含标题和章节的标准文章。"),
             icon: "doc.text.fill",
             content: """
             #set page(
@@ -32,7 +50,7 @@ class ProjectTemplates {
               margin: (x: 2cm, y: 2.5cm),
             )
             #set text(
-              font: "D-DIN",
+              font: ("New Computer Modern", "PingFang SC"),
               size: 11pt,
             )
             
@@ -48,8 +66,8 @@ class ProjectTemplates {
             """
         ),
         ProjectTemplate(
-            name: "Report",
-            description: "A detailed report with table of contents.",
+            name: L10n.text("Report", "报告"),
+            description: L10n.text("A detailed report with table of contents.", "包含目录的详细报告。"),
             icon: "book.closed.fill",
             content: """
             #set page(paper: "a4", numbering: "1")
@@ -80,8 +98,8 @@ class ProjectTemplates {
             """
         ),
         ProjectTemplate(
-            name: "Presentation",
-            description: "Slides for a presentation.",
+            name: L10n.text("Presentation", "演示文稿"),
+            description: L10n.text("Slides for a presentation.", "用于演讲的幻灯片。"),
             icon: "rectangle.inset.filled.on.rectangle",
             content: """
             #set page(
@@ -111,12 +129,12 @@ class ProjectTemplates {
             """
         ),
         ProjectTemplate(
-            name: "Resume",
-            description: "A clean and professional resume layout.",
+            name: L10n.text("Resume", "简历"),
+            description: L10n.text("A clean and professional resume layout.", "简洁专业的简历排版。"),
             icon: "person.text.rectangle",
             content: """
             #set page(paper: "a4", margin: 1.5cm)
-            #set text(font: "D-DIN", size: 10pt)
+            #set text(font: ("New Computer Modern", "PingFang SC"), size: 10pt)
             
             #align(center)[
               #text(size: 14pt, weight: "bold")[Your Name]

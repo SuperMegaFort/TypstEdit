@@ -9,7 +9,7 @@ struct ToolbarView: View {
             Group {
                 ToolbarButton(icon: "bold", action: controller.toggleBold)
                 ToolbarButton(icon: "italic", action: controller.toggleItalic)
-                ToolbarButton(icon: "underline", action: {})
+                ToolbarButton(icon: "underline", action: { controller.wrapSelection(prefix: "#underline[", suffix: "]") })
             }
             
             Rectangle().fill(Color.clear).frame(width: 12, height: 1)
@@ -40,6 +40,21 @@ struct ToolbarButton: View {
     var action: () -> Void
     @State private var isHovering = false
     
+    private var accessibilityTitle: String {
+        switch icon ?? text ?? "" {
+        case "bold": return L10n.text("Bold", "加粗")
+        case "italic": return L10n.text("Italic", "斜体")
+        case "underline": return L10n.text("Underline", "下划线")
+        case "tablecells": return L10n.text("Insert table", "插入表格")
+        case "photo": return L10n.text("Insert image", "插入图片")
+        case "chart.bar": return L10n.text("Insert chart", "插入图表")
+        case "calendar": return L10n.text("Insert timeline", "插入时间线")
+        case "H": return L10n.text("Heading", "标题")
+        case "function": return L10n.text("Math", "数学公式")
+        default: return L10n.text("Code", "代码")
+        }
+    }
+
     var body: some View {
         Button(action: action) {
             ZStack {
@@ -56,6 +71,8 @@ struct ToolbarButton: View {
             .cornerRadius(6)
         }
         .buttonStyle(.plain)
+        .help(accessibilityTitle)
+        .accessibilityLabel(accessibilityTitle)
         .onHover { inside in
             withAnimation(.easeInOut(duration: 0.1)) {
                 isHovering = inside

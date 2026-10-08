@@ -2,14 +2,22 @@ import SwiftUI
 import AppKit
 
 @MainActor
-class EditorController: NSObject, ObservableObject {
-    @Published var errors: [TypstError] = []
+class EditorController: NSObject, ObservableObject, NSPopoverDelegate {
+    @Published var languageStatus = ""
+    @Published private(set) var isFormatting = false
+    private var formatTask: Task<Void, Never>?
+    weak var document: DocumentTab?
+    @Published var errors: [TypstError] = [] { didSet { needsRedraw() } }
+    var gitRoot: URL?
+    var gitFile: URL?
+    private var gitPopover: NSPopover?
+    var gitChanges = GitLineMarkers() { didSet { needsRedraw() } }
     @Published var scrollPosition: CGFloat = 0
     
     // Référence faible vers la vue native pour manipuler le texte directement
     weak var textView: NSTextView? {
         didSet {
-            setupScrollNotification()
+            needsRedraw()
         }
     }
     
@@ -30,9 +38,58 @@ class EditorController: NSObject, ObservableObject {
     
     // Demande de redessiner la règle (numéros de ligne)
     func needsRedraw() {
-        textView?.enclosingScrollView?.verticalRulerView?.needsDisplay = true
+        if let ruler = textView?.enclosingScrollView?.verticalRulerView as? LineNumberRulerView {
+            ruler.errors = Set(errors.filter { $0.line > 0 }.map(\.line))
+            ruler.gitChanges = gitChanges
+            ruler.onGitClick = { [weak self, weak ruler] line, rect in
+                guard let ruler else { return }
+                self?.showGitChange(line: line, rect: rect, ruler: ruler)
+            }
+        }
     }
     
+    func showGitChange(line: Int, rect: NSRect, ruler: LineNumberRulerView) {
+        guard let root = gitRoot, let file = gitFile, let textView,
+              textView.window != nil, !textView.hasMarkedText() else { return }
+        closeGitReview()
+        let popover = NSPopover()
+        popover.contentSize = NSSize(width: 620, height: 340)
+        popover.behavior = .transient
+        popover.delegate = self
+        popover.contentViewController = NSHostingController(rootView: GitHunkPopover(root: root, file: file,
+            source: textView.string, line: line, close: { [weak self] in self?.closeGitReview() }))
+        gitPopover = popover
+        popover.show(relativeTo: rect, of: ruler, preferredEdge: .maxX)
+    }
+
+    func closeGitReview() {
+        let old = gitPopover
+        gitPopover = nil
+        old?.close()
+        old?.contentViewController = nil
+    }
+
+    func popoverDidClose(_ notification: Notification) {
+        if let closed = notification.object as? NSPopover, closed === gitPopover {
+            gitPopover = nil
+            closed.contentViewController = nil
+        }
+    }
+
+    func requestCompletion() { document?.editor?.complete(explicit: true) }
+    func formatDocument() {
+        guard let document, !isFormatting, document.editor?.textView.hasMarkedText() != true else { return }
+        isFormatting = true; languageStatus = L10n.text("Formatting…", "正在格式化…")
+        formatTask = Task { @MainActor [weak self, weak document] in
+            guard let self, let document else { return }
+            defer { self.isFormatting = false; self.formatTask = nil }
+            do { try await document.formatSource(requireActive: true); self.languageStatus = L10n.text("Formatted", "已格式化") }
+            catch is CancellationError { self.languageStatus = L10n.text("Formatting cancelled; draft retained.", "格式化已取消，草稿保留。") }
+            catch { self.languageStatus = error.localizedDescription }
+        }
+    }
+    func cancelFormatting() { formatTask?.cancel() }
+
     // --- Undo/Redo Functions ---
     
     func undo() {
@@ -67,7 +124,7 @@ class EditorController: NSObject, ObservableObject {
     
     // --- Search Functions ---
     
-    func performSearch() {
+    func performSearch(scrollToFirst: Bool = true) {
         guard let textView = textView, !searchQuery.isEmpty else {
             clearSearch()
             return
@@ -92,9 +149,11 @@ class EditorController: NSObject, ObservableObject {
         
         // Highlight all matches
         if !searchMatches.isEmpty {
-            currentMatchIndex = 0
+            currentMatchIndex = scrollToFirst ? 0 : min(max(0, currentMatchIndex), searchMatches.count - 1)
             highlightMatches()
-            scrollToMatch(at: 0)
+            if scrollToFirst { scrollToMatch(at: 0) }
+        } else {
+            clearSearch()
         }
     }
     
@@ -102,7 +161,7 @@ class EditorController: NSObject, ObservableObject {
         guard let textView = textView, let textStorage = textView.textStorage else { return }
         
         // Remove previous highlights
-        textStorage.removeAttribute(.backgroundColor, range: NSRange(location: 0, length: textStorage.length))
+        textView.layoutManager?.removeTemporaryAttribute(.backgroundColor, forCharacterRange: NSRange(location: 0, length: textStorage.length))
         
         // Highlight all matches in yellow
         for (index, range) in searchMatches.enumerated() {
@@ -110,7 +169,9 @@ class EditorController: NSObject, ObservableObject {
             let highlightColor = isCurrentMatch ? 
                 NSColor.systemYellow : // Current match
                 NSColor(calibratedRed: 1.0, green: 1.0, blue: 0.0, alpha: 0.3) // Other matches
-            textStorage.addAttribute(.backgroundColor, value: highlightColor, range: range)
+            if NSMaxRange(range) <= textStorage.length {
+                textView.layoutManager?.addTemporaryAttribute(.backgroundColor, value: highlightColor, forCharacterRange: range)
+            }
         }
     }
     
@@ -139,7 +200,7 @@ class EditorController: NSObject, ObservableObject {
         searchMatches = []
         currentMatchIndex = -1
         if let textView = textView, let textStorage = textView.textStorage {
-            textStorage.removeAttribute(.backgroundColor, range: NSRange(location: 0, length: textStorage.length))
+            textView.layoutManager?.removeTemporaryAttribute(.backgroundColor, forCharacterRange: NSRange(location: 0, length: textStorage.length))
         }
     }
     
@@ -154,7 +215,7 @@ class EditorController: NSObject, ObservableObject {
             textView.insertText(text, replacementRange: range)
         } else {
             // Fallback: ajout à la fin si pas de sélection valide
-            let endRange = NSRange(location: textView.string.count, length: 0)
+            let endRange = NSRange(location: textView.string.utf16.count, length: 0)
             textView.insertText(text, replacementRange: endRange)
         }
     }
@@ -167,7 +228,7 @@ class EditorController: NSObject, ObservableObject {
         if range.length == 0 {
             // Si rien n'est sélectionné : on insère les marqueurs et on place le curseur au milieu
             textView.insertText(prefix + suffix, replacementRange: range)
-            textView.setSelectedRange(NSRange(location: range.location + prefix.count, length: 0))
+            textView.setSelectedRange(NSRange(location: range.location + prefix.utf16.count, length: 0))
         } else {
             // Si du texte est sélectionné : on l'entoure
             if let string = textView.string as NSString? {
@@ -192,38 +253,23 @@ class EditorController: NSObject, ObservableObject {
     
     // --- Navigation ---
     
+    func refreshSearch() {
+        guard !searchQuery.isEmpty else { return }
+        performSearch(scrollToFirst: false)
+    }
+
     @MainActor
     func goToLine(_ lineNumber: Int) {
-        guard let textView = textView,
-              let layoutManager = textView.layoutManager else { return }
-        
+        guard lineNumber > 0, let textView else { return }
         let text = textView.string as NSString
-        var currentLine = 1
-        var charIndex = 0
-        
-        while currentLine < lineNumber && charIndex < text.length {
-            if text.character(at: charIndex) == 10 { // newline
-                currentLine += 1
-            }
-            charIndex += 1
+        var line = 1
+        var offset = 0
+        while line < lineNumber && offset < text.length {
+            offset = NSMaxRange(text.lineRange(for: NSRange(location: offset, length: 0)))
+            line += 1
         }
-        
-        let glyphIndex = layoutManager.glyphIndexForCharacter(at: charIndex)
-        let rect = layoutManager.boundingRect(forGlyphRange: NSRange(location: glyphIndex, length: 1), in: textView.textContainer!)
-        textView.scrollToVisible(rect)
-        textView.setSelectedRange(NSRange(location: charIndex, length: 0))
-    }
-    
-    @MainActor
-    private func setupScrollNotification() {
-        guard let scrollView = textView?.enclosingScrollView else { return }
-        
-        NotificationCenter.default.addObserver(
-            forName: NSView.boundsDidChangeNotification,
-            object: scrollView.contentView,
-            queue: .main
-        ) { [weak self] _ in
-            self?.objectWillChange.send()
-        }
+        let range = NSRange(location: min(offset, text.length), length: 0)
+        textView.setSelectedRange(range)
+        textView.scrollRangeToVisible(range)
     }
 }

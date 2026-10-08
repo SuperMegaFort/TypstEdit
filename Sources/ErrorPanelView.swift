@@ -3,6 +3,7 @@ import SwiftUI
 struct ErrorPanelView: View {
     @ObservedObject var compiler: TypstCompiler
     @ObservedObject var editorController: EditorController
+    var onNavigate: (TypstError) -> Void
     @EnvironmentObject var themeManager: ThemeManager
     @State private var isExpanded: Bool = true
     
@@ -14,7 +15,7 @@ struct ErrorPanelView: View {
                     .font(.caption)
                     .foregroundColor(themeManager.secondaryTextColor)
                 
-                Text("Errors")
+                Text(L10n.text("Errors", "错误"))
                     .font(.headline)
                     .foregroundColor(themeManager.textColor)
                 
@@ -45,7 +46,7 @@ struct ErrorPanelView: View {
                     HStack {
                         Image(systemName: "checkmark.circle.fill")
                             .foregroundColor(.green)
-                        Text("No errors")
+                        Text(L10n.text("No errors", "无错误"))
                             .foregroundColor(themeManager.secondaryTextColor)
                             .font(.caption)
                     }
@@ -55,7 +56,7 @@ struct ErrorPanelView: View {
                         VStack(alignment: .leading, spacing: 4) {
                             ForEach(compiler.errors) { error in
                                 ErrorRowView(error: error, onClick: {
-                                    editorController.goToLine(error.line)
+                                    onNavigate(error)
                                 })
                                 .environmentObject(themeManager)
                             }
@@ -83,11 +84,14 @@ struct ErrorRowView: View {
                     .font(.caption)
                 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Line \(error.line)")
+                    Text(error.line > 0 ? L10n.text("Line \(error.line)", "第 \(error.line) 行") : L10n.text("Compiler", "编译器"))
                         .font(.caption)
                         .fontWeight(.semibold)
                         .foregroundColor(themeManager.accentColor)
                     
+                    if let path = error.filePath {
+                        Text(URL(fileURLWithPath: path).lastPathComponent).font(.caption2).foregroundColor(.secondary)
+                    }
                     Text(error.message)
                         .font(.caption)
                         .foregroundColor(themeManager.textColor)

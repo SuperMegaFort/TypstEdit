@@ -17,8 +17,10 @@ class CustomSplitView: NSSplitView {
 struct ResizableSplitView<Left: View, Right: View>: NSViewRepresentable {
     let left: Left
     let right: Right
+    let showsRight: Bool
     
-    init(initialWidth: CGFloat = 500, @ViewBuilder left: () -> Left, @ViewBuilder right: () -> Right) {
+    init(initialWidth: CGFloat = 500, showsRight: Bool = true, @ViewBuilder left: () -> Left, @ViewBuilder right: () -> Right) {
+        self.showsRight = showsRight
         self.left = left()
         self.right = right()
     }
@@ -60,6 +62,7 @@ struct ResizableSplitView<Left: View, Right: View>: NSViewRepresentable {
         
         splitView.addArrangedSubview(leftContainer)
         splitView.addArrangedSubview(rightContainer)
+        rightContainer.isHidden = !showsRight
         
         // Add constraint to encourage 50/50 split initially (Priority 250 - Low)
         let equalWidth = leftContainer.widthAnchor.constraint(equalTo: rightContainer.widthAnchor)
@@ -79,6 +82,10 @@ struct ResizableSplitView<Left: View, Right: View>: NSViewRepresentable {
         // Update hosting controllers with new SwiftUI views
         context.coordinator.leftHost?.rootView = left
         context.coordinator.rightHost?.rootView = right
+        if let pane = nsView.arrangedSubviews.last, pane.isHidden == showsRight {
+            pane.isHidden = !showsRight
+            nsView.adjustSubviews()
+        }
     }
     
     func makeCoordinator() -> Coordinator {
@@ -90,4 +97,3 @@ struct ResizableSplitView<Left: View, Right: View>: NSViewRepresentable {
         var rightHost: NSHostingController<Right>?
     }
 }
-

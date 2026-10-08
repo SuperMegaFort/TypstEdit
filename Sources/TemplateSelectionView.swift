@@ -20,7 +20,7 @@ struct TemplateSelectionView: View {
     }
     
     var headerView: some View {
-        Text("Choose a Template")
+        Text(L10n.text("Choose a Template", "选择模板"))
             .font(.title2)
             .fontWeight(.bold)
             .foregroundColor(themeManager.textColor)
@@ -87,7 +87,7 @@ struct TemplateSelectionView: View {
     }
     
     var cancelButton: some View {
-        Button("Cancel") {
+        Button(L10n.text("Cancel", "取消")) {
             dismiss()
         }
         .keyboardShortcut(.cancelAction)

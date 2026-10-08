@@ -1,71 +1,99 @@
-import SwiftUI
 import AppKit
 
-class SyntaxHighlighter: NSObject, NSTextStorageDelegate {
-    
-    // Dark Theme Colors (One Dark / Atom)
-    private let darkComment = NSColor(red: 0.38, green: 0.44, blue: 0.48, alpha: 1.0)
-    private let darkHeading = NSColor(red: 0.38, green: 0.69, blue: 0.93, alpha: 1.0)
-    private let darkFunction = NSColor(red: 0.77, green: 0.49, blue: 0.88, alpha: 1.0)
-    private let darkString = NSColor(red: 0.60, green: 0.77, blue: 0.49, alpha: 1.0)
-    private let darkKeyword = NSColor(red: 0.77, green: 0.40, blue: 0.38, alpha: 1.0)
-    private let darkMath = NSColor(red: 0.85, green: 0.73, blue: 0.45, alpha: 1.0)
-    private let darkText = NSColor(red: 0.67, green: 0.71, blue: 0.76, alpha: 1.0)
-   
-    override init() {
-        super.init()
-    }
-    
-    func textStorage(_ textStorage: NSTextStorage, didProcessEditing editedMask: NSTextStorageEditActions, range editedRange: NSRange, changeInLength delta: Int) {
-        // Only re-highlight if characters changed
-        guard editedMask.contains(.editedCharacters) else { return }
-        
-        // Delegate to the main highlighting function
-        applyHighlighting(to: textStorage)
-    }
-    
-    /// Public method to apply syntax highlighting to a text storage
-    func applyHighlighting(to textStorage: NSTextStorage) {
-        let wholeRange = NSRange(location: 0, length: textStorage.length)
-        let string = textStorage.string
-        
-        // Reset to default
-        textStorage.addAttributes([.foregroundColor: darkText, .font: NSFont.monospacedSystemFont(ofSize: 14, weight: .regular)], range: wholeRange)
-        
-        // Keywords (let, set, show, import, include)
-        let keywords = ["let", "set", "show", "import", "include", "if", "else", "for", "while", "break", "continue", "return"]
-        for keyword in keywords {
-             highlight(pattern: "\\b\\(keyword)\\b", in: string, textStorage: textStorage, color: darkKeyword, bold: true)
-        }
-        
-        // Functions: #name or just #
-        highlight(pattern: "#[a-zA-Z0-9_]+", in: string, textStorage: textStorage, color: darkFunction, bold: false)
-        
-        // Strings: "..."
-        highlight(pattern: "\"[^\"]*\"", in: string, textStorage: textStorage, color: darkString)
-        
-        // Math: $...$
-        highlight(pattern: "\\$[^\\$]+\\$", in: string, textStorage: textStorage, color: darkMath)
+final class SyntaxHighlighter {
+    struct Span: Sendable { let range: NSRange; let style: Int }
+    private static let rules: [NSRegularExpression] = [
+        #"\b(?:let|set|show|import|include|if|else|for|while|break|continue|return)\b"#,
+        #"#[\p{L}\p{N}_-]+"#,
+        #""(?:\\.|[^"\\])*""#,
+        #"\$[^\$]+\$"#,
+        #"^=+\s+.*"#,
+        #"//.*|/\*(?:[^*]|\*(?!/))*\*/"#
+    ].map { try! NSRegularExpression(pattern: $0, options: [.anchorsMatchLines]) }
+    private let colors: [NSColor] = [
+        NSColor(red: 0.77, green: 0.40, blue: 0.38, alpha: 1),
+        NSColor(red: 0.77, green: 0.49, blue: 0.88, alpha: 1),
+        NSColor(red: 0.60, green: 0.77, blue: 0.49, alpha: 1),
+        NSColor(red: 0.85, green: 0.73, blue: 0.45, alpha: 1),
+        NSColor(red: 0.38, green: 0.69, blue: 0.93, alpha: 1),
+        NSColor(red: 0.48, green: 0.54, blue: 0.58, alpha: 1)
+    ]
 
-        // Headings: = ...
-        highlight(pattern: "^=+\\s+.*", in: string, textStorage: textStorage, color: darkHeading, bold: true)
-
-        // Comments: // ...
-        highlight(pattern: "//.*", in: string, textStorage: textStorage, color: darkComment)
-    }
-    
-    private func highlight(pattern: String, in string: String, textStorage: NSTextStorage, color: NSColor?, bold: Bool = false) {
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.anchorsMatchLines]) else { return }
-        
+    static func spans(in string: String, isCancelled: () -> Bool = { false }) -> [Span] {
         let range = NSRange(location: 0, length: string.utf16.count)
-        regex.enumerateMatches(in: string, options: [], range: range) { match, _, _ in
-            if let matchRange = match?.range {
-                if let color = color {
-                    textStorage.addAttribute(.foregroundColor, value: color, range: matchRange)
+        var result: [Span] = []
+        for (style, expression) in rules.enumerated() {
+            guard !isCancelled() else { return [] }
+            var events = 0
+            // Check each rule and every 64 matches. Progress callbacks per scanned character
+            // cost more than the matching itself; the worker serializes retiring snapshots.
+            expression.enumerateMatches(in: string, range: range) { match, _, stop in
+                events &+= 1
+                if events % 64 == 0 && isCancelled() { stop.pointee = true }
+                else if let match { result.append(Span(range: match.range, style: style)) }
+            }
+        }
+        return isCancelled() ? [] : result
+    }
+
+    private var cachedSpans: [Span] = []
+    private var styleRanges: [Range<Int>] = []
+    private var renderedRange: NSRange?
+    private weak var renderedLayout: NSLayoutManager?
+
+    func invalidate() { clearRendered(); cachedSpans = []; styleRanges = [] }
+
+    private func clearRendered() {
+        if let layout = renderedLayout, let range = renderedRange {
+            let length = layout.textStorage?.length ?? 0
+            let safe = NSIntersectionRange(range, NSRange(location: 0, length: length))
+            if safe.length > 0 { layout.removeTemporaryAttribute(.foregroundColor, forCharacterRange: safe) }
+        }
+        renderedRange = nil
+        renderedLayout = nil
+    }
+
+    func install(_ spans: [Span], in view: NSTextView) {
+        cachedSpans = spans
+        styleRanges = (0..<colors.count).map { style in
+            func boundary(_ value: Int) -> Int {
+                var low = 0
+                var high = spans.count
+                while low < high {
+                    let middle = (low + high) / 2
+                    if spans[middle].style < value { low = middle + 1 } else { high = middle }
                 }
-                if bold {
-                    textStorage.addAttribute(.font, value: NSFont.monospacedSystemFont(ofSize: 14, weight: .bold), range: matchRange)
+                return low
+            }
+            return boundary(style)..<boundary(style + 1)
+        }
+        renderVisible(in: view)
+    }
+
+    /// Temporary colors affect drawing only: editing never restyles or relays out the entire document.
+    func renderVisible(in view: NSTextView) {
+        guard let layout = view.layoutManager, let container = view.textContainer, !styleRanges.isEmpty else { return }
+        let rect = view.visibleRect.offsetBy(dx: -view.textContainerOrigin.x, dy: -view.textContainerOrigin.y)
+        let glyphs = layout.glyphRange(forBoundingRect: rect, in: container)
+        let visible = layout.characterRange(forGlyphRange: glyphs, actualGlyphRange: nil)
+        clearRendered()
+        layout.removeTemporaryAttribute(.foregroundColor, forCharacterRange: visible)
+        renderedRange = visible
+        renderedLayout = layout
+        for (style, range) in styleRanges.enumerated() {
+            var low = range.lowerBound
+            var high = range.upperBound
+            while low < high {
+                let middle = (low + high) / 2
+                if NSMaxRange(cachedSpans[middle].range) <= visible.location { low = middle + 1 } else { high = middle }
+            }
+            var index = low
+            while index < range.upperBound && cachedSpans[index].range.location < NSMaxRange(visible) {
+                let intersection = NSIntersectionRange(cachedSpans[index].range, visible)
+                if intersection.length > 0 {
+                    layout.addTemporaryAttribute(.foregroundColor, value: colors[style], forCharacterRange: intersection)
                 }
+                index += 1
             }
         }
     }

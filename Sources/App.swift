@@ -2,6 +2,7 @@ import SwiftUI
 
 @main
 struct TypstEditApp: App {
+    @NSApplicationDelegateAdaptor(ApplicationDelegate.self) private var applicationDelegate
     @StateObject private var themeManager = ThemeManager()
     
     var body: some Scene {
@@ -14,7 +15,10 @@ struct TypstEditApp: App {
         .windowStyle(.hiddenTitleBar) // Cache la barre de titre native opaque
         .windowToolbarStyle(.unified) // Unifie la barre d'outils avec le contenu
         .commands {
-            AppMenuCommands(themeManager: themeManager, selectedFile: .constant(nil))
+            AppMenuCommands()
+        }
+        Settings {
+            SettingsView()
         }
     }
 }

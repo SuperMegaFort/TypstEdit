@@ -7,3 +7,9 @@ DerivedData/
 .swiftpm/xcode/package.xcworkspace/contents.xcworkspacedata
 .netrc
 TypstEdit_Installer.dmg
+# Temporary live-preview sources (cleaned up on normal close)
+typstedit-preview-*.typ
+.typstedit-preview-*.typ
+.typstedit-export-*.typ
+.*.preview.typ
+.*.preview.pdf
